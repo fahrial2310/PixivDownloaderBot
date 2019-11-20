@@ -50,12 +50,15 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         with TemporaryDirectory() as dir:
             try:
                 downloads = self.client.download_by_url(url, dir)
-                message.reply_text(f'Downloading {url}', reply_to_message_id=message_id, disable_web_page_preview=True)
+                downloadin_msg = message.reply_text(f'Downloading {url}', reply_to_message_id=message_id,
+                                                          disable_web_page_preview=True)
+                downloadin_msg = downloadin_msg.result()
             except PixivDownloaderError:
                 message.reply_text(f'Post ({url}) not found', reply_to_message_id=message_id, disable_web_page_preview=True)
                 return
 
-            for chunk in self._chunks(downloads, 10):
+            for index, chunk in enumerate(self._chunks(downloads, 10)):
+                self.logger.info(f'Downloading chuck {index} of {url}')
                 works = list(chunk)
 
                 if len(works) == 1:
@@ -69,6 +72,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                     media_group = map(InputMediaPhoto, map(self._file_to_bytes, works))
                     bot.send_media_group(chat_id, media_group, reply_to_message_id=message_id,
                                          timeout=120, caption=url)
+            downloadin_msg.delete()
 
     def downloader(self, bot: Bot, update: Update):
         urls = update.effective_message.text
