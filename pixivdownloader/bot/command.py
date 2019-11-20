@@ -1,4 +1,5 @@
 from io import BytesIO
+from itertools import chain, islice
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import logging
@@ -27,12 +28,12 @@ I am here to help you download posts from [Pixiv](https://pixiv.net/).
 Just send me a link or the id of the post and I'll give you the images / videos.
 """)
 
-    def _chunks(self, l, n):
-        """Yield successive n-sized chunks from l.
-        https://stackoverflow.com/a/312464
+    def _chunks(self, iterable, size=10):
+        """https://stackoverflow.com/a/24527424
         """
-        for i in range(0, len(l), n):
-            yield l[i:i + n]
+        iterator = iter(iterable)
+        for first in iterator:
+            yield chain([first], islice(iterator, size - 1))
 
     def _file_to_bytes(self, path: Path) -> BytesIO:
         bytes = BytesIO()
@@ -41,34 +42,43 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         return bytes
 
     @run_async
-    def downloader(self, bot: Bot, update: Update):
-        chat_id = update.effective_message.chat_id
+    def _download(self, bot, update, url):
+        chat_id = update.effective_chat.id
         message = update.effective_message
         message_id = message.message_id
-        url = message.text
-        if not url:
-            message.reply_text('No URL or ID supplied')
-            return
 
         with TemporaryDirectory() as dir:
             try:
                 downloads = self.client.download_by_url(url, dir)
-                message.reply_text('Downloading...', reply_to_message_id=message_id)
-                downloads = list(downloads)
+                message.reply_text(f'Downloading {url}', reply_to_message_id=message_id, disable_web_page_preview=True)
             except PixivDownloaderError:
-                message.reply_text(f'Post ({url}) not found', reply_to_message_id=message_id, link_preview=False)
+                message.reply_text(f'Post ({url}) not found', reply_to_message_id=message_id, disable_web_page_preview=True)
                 return
 
-            if len(downloads) == 1:
-                download = downloads[0]
-                if download.suffix == '.mp4':
-                    bot.send_video(chat_id, self._file_to_bytes(download), reply_to_message_id=message_id)
+            for chunk in self._chunks(downloads, 10):
+                works = list(chunk)
+
+                if len(works) == 1:
+                    work = works[0]
+                    if work.suffix == '.mp4':
+                        bot.send_video(chat_id, self._file_to_bytes(work), reply_to_message_id=message_id, caption=url,
+                                       timeout=60)
+                    else:
+                        bot.send_photo(chat_id, self._file_to_bytes(work), reply_to_message_id=message_id, caption=url)
                 else:
-                    bot.send_photo(chat_id, self._file_to_bytes(download), reply_to_message_id=message_id)
-            else:
-                for chunk in self._chunks(downloads, 10):
-                    media_group = map(InputMediaPhoto, map(self._file_to_bytes, chunk))
-                    bot.send_media_group(chat_id, media_group, reply_to_message_id=message_id)
+                    media_group = map(InputMediaPhoto, map(self._file_to_bytes, works))
+                    bot.send_media_group(chat_id, media_group, reply_to_message_id=message_id,
+                                         timeout=120, caption=url)
+
+    def downloader(self, bot: Bot, update: Update):
+        urls = update.effective_message.text
+
+        if not urls:
+            update.effective_message.reply_text('No URL or ID supplied')
+            return
+
+        for url in urls.split('\n'):
+            self._download(bot, update, url)
 
 
 command = Command()
