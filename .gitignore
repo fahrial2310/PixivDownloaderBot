@@ -259,3 +259,4 @@ settings.py
 buildout.cfg
 src/
 .mr.developer.cfg
+media/
