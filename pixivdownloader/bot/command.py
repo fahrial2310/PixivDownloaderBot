@@ -51,7 +51,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         return bytes
 
     def _with_url_possible(self, path: Path) -> bool:
-        size = path.stat().st_size / 1024 / 1024  # In MB
+        size = path.stat().st_size / 1000 / 1000  # In MB
         extension = path.suffix.lower().lstrip('.')
         return URL and (
             (extension in ['png', 'jpg', 'jpeg', 'webp'] and size <= 5)
@@ -144,6 +144,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         if downloads:
             return post_id, list(downloads)
 
+        self.logger.info(f'Start downloading post {post_id}')
         if post:
             downloader = self.client.download(post, path)
         else:
@@ -162,7 +163,11 @@ Just send me a link or the id of the post and I'll give you the images / videos.
 
         ids = re.findall('(\\d+)', url.replace('\n', ' '))
         for id in ids:
-            self._download_all_of_user(bot, update, id, zip_it=zip_it)
+            try:
+                self._download_all_of_user(bot, update, id, zip_it=zip_it)
+            except Exception as e:
+                update.effective_message.reply_text(f'Could not finish sending {id}\'s works for unknown reason')
+                self.logger.exception(e)
 
     def _download_all_of_user(self, bot, update, user_id, zip_it=False):
         illusts = []
@@ -175,27 +180,45 @@ Just send me a link or the id of the post and I'll give you the images / videos.
 
         total = len(illusts)
         update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work) from {user_id}')
+        self.logger.info(f'Start downloading {user_id}\'s posts')
 
         next_zip = {}
         xth_zip = 1
         current_size = 0
         pool = Pool(4)
-        for index, (id, paths) in enumerate(pool.imap(self._simple_download, illusts), 1):
+        for index, (id, paths) in enumerate(pool.imap(self._simple_download, illusts, 4), 1):
             if zip_it:
                 size = sum(map(lambda path: path.stat().st_size, paths))
-                size = size / 1024 / 1024
+                size = size / 1000 / 1000
+                is_last = index == total
 
-                if current_size + size >= 50 or index == total:
-                    self._send_as_zip(chain(*next_zip.values()), f'{user_id} - {xth_zip}.zip', update,
-                                      caption=f'{index}/{total}', additional_files={
-                                          'posts.txt': '\n'.join(map(str, next_zip.keys())) + '\n'
-                                      })
+                if current_size + size >= 50 or is_last:
+                    send_last_lonely = False
+                    if is_last and current_size + size <= 50:
+                        next_zip[id] = paths
+                    elif is_last:
+                        send_last_lonely = True
+
+                    try:
+                        post = index if index == total else index - 1
+                        self._send_as_zip(chain(*next_zip.values()), f'{user_id} - {xth_zip}.zip', update,
+                                          caption=f'{post}/{total}', additional_files={
+                                              'posts.txt': '\n'.join(map(str, next_zip.keys())) + '\n'
+                                          })
+
+                        if send_last_lonely:
+                            self._send_as_zip(paths, f'{user_id} - {xth_zip + 1}.zip', update,
+                                          caption=f'{total}/{total}', additional_files={
+                                              'posts.txt': str(id) + '\n'
+                                          })
+                    except Exception as e:
+                        update.effective_message.reply_text(f'Could not send ZIP "{user_id} - {xth_zip}" for unknown reason')
+                        self.logger.exception(e)
                     xth_zip += 1
                     current_size = 0
                     next_zip = {}
-                else:
-                    current_size += size
-                    next_zip[id] = paths
+                current_size += size
+                next_zip[id] = paths
             else:
                 try:
                     self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ')
