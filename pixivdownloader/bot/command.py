@@ -128,8 +128,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             for additional_file, content in additional_files.items():
                 zipfile.writestr(additional_file, content)
         bytes.seek(0)
-        update.effective_message.reply_document(bytes, filename=filename, caption=caption)
-
+        update.effective_message.reply_document(bytes, filename=filename, caption=caption, timeout=120)
 
     def _simple_download(self, id_or_post):
         if isinstance(id_or_post, dict):
