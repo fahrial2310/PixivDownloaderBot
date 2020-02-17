@@ -1,12 +1,13 @@
 from io import BytesIO
 from itertools import chain, islice
+from multiprocessing import Pool
 from pathlib import Path
 from urllib.parse import urlparse
 import logging
 import re
 
 from pixiv.downloader import PixivDownloader, PixivDownloaderError
-from telegram import Bot, Update, InputMediaPhoto
+from telegram import Bot, Update, InputMediaPhoto, ParseMode
 from telegram.ext import run_async, MessageHandler, Filters
 
 from pixivdownloader.bot.bot import main_bot
@@ -14,6 +15,8 @@ from pixivdownloader.bot.settings import PIXIV_USERNAME, PIXIV_PASSWORD, URL, DO
 
 
 class Command:
+    post_link = 'https://www.pixiv.net/en/artworks/{}'
+
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
@@ -61,74 +64,84 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         else:
             return self._file_to_bytes(path)
 
-    @run_async
-    def _download(self, bot, update, id, downloading_message=True):
+    def downloader(self, bot: Bot, update: Update):
+        message = update.effective_message
+        text = message.text
+
+        if not text:
+            message.reply_text('No URL or ID supplied')
+            return
+
+        ids = re.findall('(\\d+)', text.replace('\n', ' '))
+        total = len(ids)
+        for index, id in enumerate(ids, 1):
+            downloadin_msg = message.reply_markdown(f'Downloading `{id}`', reply_to_message_id=message.message_id)
+            downloadin_msg = downloadin_msg.result()
+
+            try:
+                id, paths = self._simple_download(id)
+                self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ' if total > 1 else '')
+            except PixivDownloaderError:
+                message.reply_markdown(f'Post `{id}` not found', reply_to_message_id=message.message_id)
+
+            downloadin_msg.delete()
+
+    def _send_to_user(self, id, paths, bot, update, prefix=''):
         chat_id = update.effective_chat.id
         message = update.effective_message
-        message_id = message.message_id
+        default_kwargs = {
+            'timeout': 120,
+            'reply_to_message_id': message.message_id,
+            'parse_mode': ParseMode.MARKDOWN,
+        }
 
-        downloadin_msg = None
-
-        post = None
-        if isinstance(id, dict):
-            post = id
-            id = str(id['id'])
-
-        out_path = self.out_dir / id
-        out_path.mkdir(exist_ok=True)
-        downloads = list(out_path.glob('*.*'))
-
-        if not downloads:
-            try:
-                if post:
-                    downloads = self.client.download(post, out_path)
-                else:
-                    downloads = self.client.download_by_id(id, out_path)
-
-                if downloading_message:
-                    downloadin_msg = message.reply_markdown(f'Downloading `{id}`', reply_to_message_id=message_id)
-                    downloadin_msg = downloadin_msg.result()
-            except PixivDownloaderError:
-                message.reply_markdown(f'Post `{id}` not found', reply_to_message_id=message_id)
-                return
-
-        for index, chunk in enumerate(self._chunks(downloads, 10)):
-            self.logger.info(f'Getting chuck {index} of {id}')
+        for index, chunk in enumerate(self._chunks(paths, 10)):
             works = list(chunk)
-            for jindex, work in enumerate(works[:]):
-                new_work = work.parent / f'p{id}-{jindex}{work.suffix}'
-                work.rename(new_work)
-                works[jindex] = new_work
+            kwargs = default_kwargs.copy()
+            kwargs['caption'] = f'{prefix}[{id}]({self.post_link})'.format(id)
 
             if len(works) == 1:
                 work = works[0]
                 if work.suffix == '.mp4':
-                    bot.send_video(chat_id, self._file_to_upload(work), reply_to_message_id=message_id, caption=id,
-                                   timeout=60)
+                    bot.send_video(chat_id, self._file_to_upload(work), **kwargs)
                 else:
-                    bot.send_photo(chat_id, self._file_to_upload(work), reply_to_message_id=message_id, caption=id)
+                    bot.send_photo(chat_id, self._file_to_upload(work), **kwargs)
             else:
                 media_group = []
-                for kindex, illustration in enumerate(works):
-                    media_group.append(InputMediaPhoto(self._file_to_upload(illustration),
-                                                       caption=f'{id} - {kindex + 1:0>2}'))
-                bot.send_media_group(chat_id, media_group, reply_to_message_id=message_id,
-                                     timeout=120, caption=id)
+                for jindex, path in enumerate(works, 1):
+                    jkwargs = {
+                        'caption': kwargs['caption'] + f' - {jindex}',
+                        'parse_mode': kwargs['parse_mode'],
+                    }
+                    media_group.append(InputMediaPhoto(self._file_to_upload(path), **jkwargs))
 
-        if downloadin_msg:
-            downloadin_msg.delete()
+                bot.send_media_group(chat_id, media_group, **kwargs)
 
-    def downloader(self, bot: Bot, update: Update):
-        urls = update.effective_message.text
+    def _simple_download(self, id_or_post):
+        if isinstance(id_or_post, dict):
+            post = id_or_post
+            post_id = id_or_post['id']
+        else:
+            post = None
+            post_id = id_or_post
 
-        if not urls:
-            update.effective_message.reply_text('No URL or ID supplied')
-            return
+        path = self.out_dir / str(post_id)
+        path.mkdir(parents=True, exist_ok=True)
+        downloads = list(path.glob('*.*'))
+        if downloads:
+            return post_id, list(downloads)
 
-        for url in urls.split('\n'):
-            ids = re.findall('(\\d+)', urlparse(url).path)
-            for id in ids:
-                self._download(bot, update, id)
+        if post:
+            downloader = self.client.download(post, path)
+        else:
+            downloader = self.client.download_by_id(post_id, path)
+
+        resultset = []
+        for index, path in enumerate(downloader):
+            new_path = path.parent / f'p{post_id}-{index}{path.suffix}'
+            path.rename(new_path)
+            resultset.append(new_path)
+        return post_id, resultset
 
     def all_from_user(self, bot: Bot, update: Update):
         url = update.effective_message.text
@@ -139,13 +152,19 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             result = self.client.api.user_illusts(id, filter=None, req_auth=True, offset=len(illusts))
             illusts += result['illusts']
             if not illusts:
-                self.message.reply_text('No works found for given user')
+                update.effective_message.reply_text('No works found for given user')
                 return
 
-        update.effective_message.reply_text(f'Downloading {len(illusts)} works (there can be multiple images per work:')
-        for illustration in illusts:
-            self._download(bot, update, illustration, downloading_message=False)
-        # update.effective_message.reply_text(f'Finished sending all works of "{illusts[0]["user"]["name"]}".')
+        total = len(illusts)
+        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work:')
+        for index, (id, paths) in enumerate(Pool(4).imap(self._simple_download, illusts)):
+            try:
+                self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ')
+            except Exception as e:
+                update.effective_message.reply_text(f'Could not download/send post "{id}"')
+                self.logger.exception(e)
+
+        # update.effective_message.reply_text(f'Finished downloading all works of "{illusts[0]["user"]["name"]}".')
 
 
 command = Command()
