@@ -172,12 +172,13 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 return
 
         total = len(illusts)
-        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work:')
+        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work:)')
 
         next_zip = {}
         xth_zip = 1
         current_size = 0
-        for index, (id, paths) in enumerate(Pool(4).imap(self._simple_download, illusts), 1):
+        pool = Pool(4)
+        for index, (id, paths) in enumerate(pool.imap(self._simple_download, illusts), 1):
             if zip_it:
                 size = sum(map(lambda path: path.stat().st_size, paths))
                 size = size / 1024 / 1024
@@ -199,6 +200,8 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 except Exception as e:
                     update.effective_message.reply_text(f'Could not download/send post "{id}"')
                     self.logger.exception(e)
+        pool.close()
+        pool.join()
 
 
 command = Command()
