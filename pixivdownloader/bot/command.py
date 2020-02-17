@@ -160,18 +160,21 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         url = update.effective_message.text
         zip_it = 'zip' in url
 
-        id = re.findall('(\\d+)', url)[0]
+        ids = re.findall('(\\d+)', url.replace('\n', ' '))
+        for id in ids:
+            self._download_all_of_user(bot, update, id, zip_it=zip_it)
 
+    def _download_all_of_user(self, bot, update, user_id, zip_it=False):
         illusts = []
         while len(illusts) % 30 == 0:
-            result = self.client.api.user_illusts(id, filter=None, req_auth=True, offset=len(illusts))
+            result = self.client.api.user_illusts(user_id, filter=None, req_auth=True, offset=len(illusts))
             illusts += result['illusts']
             if not illusts:
                 update.effective_message.reply_text('No works found for given user')
                 return
 
         total = len(illusts)
-        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work:)')
+        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work) from {user_id}')
 
         next_zip = {}
         xth_zip = 1
@@ -183,7 +186,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 size = size / 1024 / 1024
 
                 if current_size + size >= 50 or index == total:
-                    self._send_as_zip(chain(*next_zip.values()), f'{id} - {xth_zip}.zip', update,
+                    self._send_as_zip(chain(*next_zip.values()), f'{user_id} - {xth_zip}.zip', update,
                                       caption=f'{index}/{total}', additional_files={
                                           'posts.txt': '\n'.join(map(str, next_zip.keys())) + '\n'
                                       })
