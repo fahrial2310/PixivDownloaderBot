@@ -3,6 +3,7 @@ from itertools import chain, islice
 from multiprocessing import Pool
 from pathlib import Path
 from urllib.parse import urlparse
+from zipfile import ZipFile
 import logging
 import re
 
@@ -117,6 +118,19 @@ Just send me a link or the id of the post and I'll give you the images / videos.
 
                 bot.send_media_group(chat_id, media_group, **kwargs)
 
+    def _send_as_zip(self, paths, filename, update, additional_files=None, caption=None):
+        additional_files = additional_files or {}
+
+        bytes = BytesIO()
+        with ZipFile(bytes, mode='w') as zipfile:
+            for path in paths:
+                zipfile.write(path, path.name)
+            for additional_file, content in additional_files.items():
+                zipfile.writestr(additional_file, content)
+        bytes.seek(0)
+        update.effective_message.reply_document(bytes, filename=filename, caption=caption)
+
+
     def _simple_download(self, id_or_post):
         if isinstance(id_or_post, dict):
             post = id_or_post
@@ -145,6 +159,8 @@ Just send me a link or the id of the post and I'll give you the images / videos.
 
     def all_from_user(self, bot: Bot, update: Update):
         url = update.effective_message.text
+        zip_it = 'zip' in url
+
         id = re.findall('(\\d+)', url)[0]
 
         illusts = []
@@ -157,14 +173,32 @@ Just send me a link or the id of the post and I'll give you the images / videos.
 
         total = len(illusts)
         update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work:')
-        for index, (id, paths) in enumerate(Pool(4).imap(self._simple_download, illusts)):
-            try:
-                self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ')
-            except Exception as e:
-                update.effective_message.reply_text(f'Could not download/send post "{id}"')
-                self.logger.exception(e)
 
-        # update.effective_message.reply_text(f'Finished downloading all works of "{illusts[0]["user"]["name"]}".')
+        next_zip = {}
+        xth_zip = 1
+        current_size = 0
+        for index, (id, paths) in enumerate(Pool(4).imap(self._simple_download, illusts), 1):
+            if zip_it:
+                size = sum(map(lambda path: path.stat().st_size, paths))
+                size = size / 1024 / 1024
+
+                if current_size + size >= 50 or index == total:
+                    self._send_as_zip(chain(*next_zip.values()), f'{id} - {xth_zip}.zip', update,
+                                      caption=f'{index}/{total}', additional_files={
+                                          'posts.txt': '\n'.join(map(str, next_zip.keys())) + '\n'
+                                      })
+                    xth_zip += 1
+                    current_size = 0
+                    next_zip = {}
+                else:
+                    current_size += size
+                    next_zip[id] = paths
+            else:
+                try:
+                    self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ')
+                except Exception as e:
+                    update.effective_message.reply_text(f'Could not download/send post "{id}"')
+                    self.logger.exception(e)
 
 
 command = Command()
