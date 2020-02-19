@@ -27,8 +27,13 @@ class Command:
 
         main_bot.add_command(name='start', func=self.start)
         main_bot.add_command(MessageHandler, func=self.all_from_user,
-                             filters=Filters.text & Filters.regex(re.compile('https://www.pixiv.net/en/users/\\d+', flags=re.IGNORECASE)))
-        main_bot.add_command(MessageHandler, func=self.downloader, filters=Filters.text)
+                             filters=Filters.text & Filters.regex(re.compile('https://www.pixiv.net(/\\w+)?/users/\\d+', flags=re.IGNORECASE)))
+        main_bot.add_command(MessageHandler, func=self.downloader,
+                             filters=(Filters.text
+                                      & (Filters.regex(re.compile('https://www.pixiv.net(/\\w+)?/artworks/\\d+', flags=re.IGNORECASE))
+                                         | Filters.regex(re.compile('^[\\s\\d]+$', flags=re.IGNORECASE)))
+                                     )
+                            )
 
     def start(self, bot: Bot, update: Update):
         update.message.reply_markdown("""Hey,
