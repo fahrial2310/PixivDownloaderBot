@@ -113,13 +113,9 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 else:
                     bot.send_photo(chat_id, self._file_to_upload(work), **kwargs)
             else:
-                media_group = []
-                for jindex, path in enumerate(works, 1):
-                    jkwargs = {
-                        'caption': kwargs['caption'] + f' - {jindex}',
-                        'parse_mode': kwargs['parse_mode'],
-                    }
-                    media_group.append(InputMediaPhoto(self._file_to_upload(path), **jkwargs))
+                media_group = [InputMediaPhoto(self._file_to_upload(path)) for path in works]
+                media_group[0].caption = kwargs['caption']
+                media_group[0].parse_mode = kwargs['parse_mode']
 
                 bot.send_media_group(chat_id, media_group, **kwargs)
 
