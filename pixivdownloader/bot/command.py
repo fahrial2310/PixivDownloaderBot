@@ -1,6 +1,6 @@
 from io import BytesIO
 from itertools import chain, islice
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 from pathlib import Path
 from urllib.parse import urlparse
 from zipfile import ZipFile
@@ -169,10 +169,87 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 update.effective_message.reply_text(f'Could not finish sending {id}\'s works for unknown reason')
                 self.logger.exception(e)
 
+    class Sender:
+        def __init__(self, parent, zip_it, user_id, total, update, bot):
+            self.parent = parent
+            self.zip_it = zip_it
+            self.user_id = user_id
+            self.total = total
+            self.update = update
+            self.bot = bot
+
+            manager = Manager()
+            self.current_size = manager.Value('i', 0)
+            self.xth_zip = manager.Value('i', 1)
+            self.next_zip = manager.dict()
+            self.lock = manager.Lock()
+
+            self.logger = logging.getLogger(self.__class__.__name__)
+
+        def _send_as_zip(self, id, paths, index):
+            size = sum(map(lambda path: path.stat().st_size, paths))
+            size = size / 1000 / 1000
+            is_last = index == self.total
+
+            if self.current_size.value + size >= 50 or is_last:
+                send_last_lonely = False
+                if is_last and self.current_size.value + size <= 50:
+                    self.next_zip[id] = paths
+                elif is_last:
+                    send_last_lonely = True
+
+                try:
+                    self.logger.info(f'Sending zip with {self.next_zip.keys()}')
+                    post = index if index == self.total else index - 1
+                    self.parent._send_as_zip(chain(*self.next_zip.values()), f'{self.user_id} - {self.xth_zip.value}.zip',
+                                        self.update,
+                                      caption=f'{post}/{self.total}', additional_files={
+                                          'posts.txt': '\n'.join(map(str, self.next_zip.keys())) + '\n'
+                                      })
+
+                    if send_last_lonely:
+                        self.logger.info(f'Sending zip with {self.next_zip.keys()}')
+                        self._send_as_zip(paths, f'{self.user_id} - {self.xth_zip.value + 1}.zip', self.update,
+                                      caption=f'{self.total}/{self.total}', additional_files={
+                                          'posts.txt': str(id) + '\n'
+                                      })
+                except Exception as e:
+                    self.update.effective_message.reply_text(f'Could not send ZIP "{self.user_id} - {self.xth_zip.value}" for unknown reason')
+                    self.logger.exception(e)
+                self.xth_zip.value += 1
+                self.current_size.value= 0
+                self.next_zip.clear()
+            self.current_size.value += size
+            self.next_zip[id] = paths
+
+        def send_as_zip(self, id, paths, index):
+            with self.lock:
+                self._send_as_zip(id, paths, index)
+
+        def send_as_media(self, id, paths, index):
+            try:
+                self.logger.info(f'Sending {id} to user')
+                self.parent._send_to_user(id, paths, self.bot, self.update, prefix=f'{index}/{self.total} ')
+            except Exception as e:
+                self.update.effective_message.reply_text(f'Could not download/send post "{self.parent.post_link.format(id)}"')
+                self.logger.exception(e)
+
+        def send(self, data):
+            index, (id, paths) = data
+
+            if self.zip_it:
+                self.send_as_zip(id, paths, index)
+            else:
+                self.send_as_media(id, paths, index)
+
     def _download_all_of_user(self, bot, update, user_id, zip_it=False):
         illusts = []
-        while len(illusts) % 30 == 0:
-            result = self.client.api.user_illusts(user_id, filter=None, req_auth=True, offset=len(illusts))
+        total_before = -1
+        update.effective_message.reply_text(f'Collecting posts of user {user_id}')
+        while len(illusts) % 30 == 0 and not total_before == len(illusts):
+            total_before = len(illusts)
+            self.logger.info(f'Collecting posts of user "{user_id}" - offset {total_before}')
+            result = self.client.api.user_illusts(user_id, filter=None, req_auth=True, offset=total_before)
             illusts += result['illusts']
             if not illusts:
                 update.effective_message.reply_text('No works found for given user')
@@ -182,51 +259,39 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work) from {user_id}')
         self.logger.info(f'Start downloading {user_id}\'s posts')
 
-        next_zip = {}
-        xth_zip = 1
-        current_size = 0
-        pool = Pool(4)
-        for index, (id, paths) in enumerate(pool.imap(self._simple_download, illusts, 4), 1):
-            if zip_it:
-                size = sum(map(lambda path: path.stat().st_size, paths))
-                size = size / 1000 / 1000
-                is_last = index == total
+        sender = self.Sender(self, zip_it, user_id, total, update, bot)
 
-                if current_size + size >= 50 or is_last:
-                    send_last_lonely = False
-                    if is_last and current_size + size <= 50:
-                        next_zip[id] = paths
-                    elif is_last:
-                        send_last_lonely = True
+        download_pool = Pool(4)
+        sender_pool = Pool(4)
 
-                    try:
-                        post = index if index == total else index - 1
-                        self._send_as_zip(chain(*next_zip.values()), f'{user_id} - {xth_zip}.zip', update,
-                                          caption=f'{post}/{total}', additional_files={
-                                              'posts.txt': '\n'.join(map(str, next_zip.keys())) + '\n'
-                                          })
+        class DownloadIter:
+            def __init__(self, iterable, length):
+                self.iterable = iterable
+                self.length = length
 
-                        if send_last_lonely:
-                            self._send_as_zip(paths, f'{user_id} - {xth_zip + 1}.zip', update,
-                                          caption=f'{total}/{total}', additional_files={
-                                              'posts.txt': str(id) + '\n'
-                                          })
-                    except Exception as e:
-                        update.effective_message.reply_text(f'Could not send ZIP "{user_id} - {xth_zip}" for unknown reason')
-                        self.logger.exception(e)
-                    xth_zip += 1
-                    current_size = 0
-                    next_zip = {}
-                current_size += size
-                next_zip[id] = paths
-            else:
-                try:
-                    self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ')
-                except Exception as e:
-                    update.effective_message.reply_text(f'Could not download/send post "{id}"')
-                    self.logger.exception(e)
-        pool.close()
-        pool.join()
+            def __len__(self):
+                return self.length
+
+            def __iter__(self):
+                return self.iterable
+
+            def __next__(self):
+                return next(self.iterable)
+
+        download_iter = DownloadIter(
+            enumerate(download_pool.imap(self._simple_download, illusts, 4), 1),
+            total)
+
+        sender_pool.map(sender.send, download_iter, 4)
+
+        self.logger.info(f'All {user_id} posts have been sent')
+        update.effective_message.reply_text(f'All {total} posts for user {user_id} have been sent')
+
+        sender_pool.close()
+        download_pool.close()
+
+        sender_pool.join()
+        download_pool.join()
 
 
 command = Command()
