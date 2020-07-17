@@ -104,6 +104,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
     def downloader(self, bot: Bot, update: Update):
         message = update.effective_message
         text = message.text
+        tried_relogin = False
 
         if not text:
             message.reply_text('No URL or ID supplied')
@@ -114,11 +115,22 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         for index, id in enumerate(ids, 1):
             downloadin_msg = message.reply_markdown(f'Downloading `{id}`', reply_to_message_id=message.message_id)
             downloadin_msg = downloadin_msg.result()
+            paths = None
 
             try:
                 id, paths = self._simple_download(id)
-                self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ' if total > 1 else '')
             except PixivDownloaderError:
+                if not tried_relogin:
+                    try:
+                        self.login()
+                        id, paths = self._simple_download(id)
+                    except:
+                        pass
+                    finally:
+                        tried_relogin = True
+            if paths:
+                self._send_to_user(id, paths, bot, update, prefix=f'{index}/{total} ' if total > 1 else '')
+            else:
                 message.reply_markdown(f'Post `{id}` not found', reply_to_message_id=message.message_id)
 
             downloadin_msg.delete()
@@ -190,6 +202,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         return post_id, resultset
 
     def all_from_user(self, bot: Bot, update: Update):
+        tried_relogin = False
         url = update.effective_message.text
         zip_it = 'zip' in url
 
@@ -198,8 +211,17 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             try:
                 self._download_all_of_user(bot, update, id, zip_it=zip_it)
             except Exception as e:
+                if not tried_relogin:
+                    try:
+                        self.login()
+                        self._download_all_of_user(bot, update, id, zip_it=zip_it)
+                        continue
+                    except:
+                        pass
+                    finally:
+                        tried_relogin = True
+
                 update.effective_message.reply_text(f'Could not finish sending {id}\'s works for unknown reason')
-                self.logger.exception(e)
 
     class Sender:
         def __init__(self, parent, zip_it, user_id, total, update, bot):
