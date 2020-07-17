@@ -5,7 +5,7 @@ from threading import Thread
 from typing import Callable, List, Type
 
 from telegram import Bot, Update, User
-from telegram.ext import CommandHandler, Filters, Handler, Updater, messagequeue, MessageHandler
+from telegram.ext import CommandHandler, Filters, Handler, Updater, messagequeue, MessageHandler, run_async
 from telegram.utils.request import Request
 
 from .settings import ADMINS, LOG_LEVEL, MODE, TELEGRAM_API_TOKEN
@@ -100,6 +100,7 @@ class MainBot:
         self.logger.info('Restarting: starting')
         os.execl(sys.executable, sys.executable, *sys.argv + [f'is_restart={chat_id}'])
 
+    @run_async
     def restart(self, bot: Bot, update: Update):
         """Start the restarting process
 
