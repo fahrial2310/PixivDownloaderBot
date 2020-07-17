@@ -255,18 +255,23 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 try:
                     self.logger.info(f'Sending zip with {self.next_zip.keys()}')
                     post = index if index == self.total else index - 1
-                    self.parent._send_as_zip(chain(*self.next_zip.values()), f'{self.user_id} - {self.xth_zip.value}.zip',
-                                        self.update,
-                                      caption=f'{post}/{self.total}', additional_files={
-                                          'posts.txt': '\n'.join(map(str, self.next_zip.keys())) + '\n'
-                                      })
 
+                    self.parent._send_as_zip(
+                        paths=chain(*self.next_zip.values()),
+                        filename=f'{self.user_id} - {self.xth_zip.value}.zip',
+                        update=self.update,
+                        additional_files={'posts.txt': '\n'.join(map(str, self.next_zip.keys())) + '\n'},
+                        caption=f'{post}/{self.total}'
+                    )
                     if send_last_lonely:
                         self.logger.info(f'Sending zip with {self.next_zip.keys()}')
-                        self._send_as_zip(paths, f'{self.user_id} - {self.xth_zip.value + 1}.zip', self.update,
-                                      caption=f'{self.total}/{self.total}', additional_files={
-                                          'posts.txt': str(id) + '\n'
-                                      })
+                        self.parent._send_as_zip(
+                            paths=paths,
+                            filename=f'{self.user_id} - {self.xth_zip.value + 1}.zip',
+                            update=self.update,
+                            additional_files={'posts.txt': str(id) + '\n'},
+                            caption=f'{self.total}/{self.total}'
+                        )
                 except Exception as e:
                     self.update.effective_message.reply_text(f'Could not send ZIP "{self.user_id} - {self.xth_zip.value}" for unknown reason')
                     self.logger.exception(e)
