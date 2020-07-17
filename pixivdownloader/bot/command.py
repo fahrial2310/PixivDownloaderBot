@@ -195,10 +195,14 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             downloader = self.client.download_by_id(post_id, path)
 
         resultset = []
-        for index, path in enumerate(downloader):
-            new_path = path.parent / f'p{post_id}-{index}{path.suffix}'
-            path.rename(new_path)
-            resultset.append(new_path)
+        try:
+            for index, path in enumerate(downloader):
+                new_path = path.parent / f'p{post_id}-{index}{path.suffix}'
+                path.rename(new_path)
+                resultset.append(new_path)
+        except Exception as e:
+            self.logger.exception(e)
+            return post_id, []
         return post_id, resultset
 
     def all_from_user(self, bot: Bot, update: Update):
@@ -290,11 +294,17 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 self.logger.info(f'Sending {id} to user')
                 self.parent._send_to_user(id, paths, self.bot, self.update, prefix=f'{index}/{self.total} ')
             except Exception as e:
-                self.update.effective_message.reply_text(f'Could not download/send post "{self.parent.post_link.format(id)}"')
+                self.fail(id)
                 self.logger.exception(e)
+
+        def fail(self, id):
+            self.update.effective_message.reply_text(f'Could not download/send post "{self.parent.post_link.format(id)}"')
 
         def send(self, data):
             index, (id, paths) = data
+            if not paths:
+                self.fail(id)
+                return
 
             if self.zip_it:
                 self.send_as_zip(id, paths, index)
