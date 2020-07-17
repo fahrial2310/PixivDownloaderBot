@@ -17,13 +17,15 @@ from pixivdownloader.bot.settings import PIXIV_USERNAME, PIXIV_PASSWORD, URL, DO
 
 class Command:
     post_link = 'https://www.pixiv.net/en/artworks/{}'
+    _refresh_token_path = Path('pixiv-credentials').absolute()
 
     def __init__(self):
+        self.client = PixivDownloader()
         self.logger = logging.getLogger(self.__class__.__name__)
-
-        self.client = PixivDownloader(username=PIXIV_USERNAME, password=PIXIV_PASSWORD)
         self.out_dir = Path(DOWNLOAD_TO)
         self.out_dir.mkdir(parents=True, exist_ok=True)
+
+        self.login()
 
         main_bot.add_command(name='start', func=self.start)
         main_bot.add_command(MessageHandler, func=self.all_from_user,
@@ -41,6 +43,35 @@ class Command:
 I am here to help you download posts from [Pixiv](https://pixiv.net/).
 Just send me a link or the id of the post and I'll give you the images / videos.
 """)
+
+    @property
+    def refresh_token(self):
+        if not self._refresh_token_path.is_file():
+            return None
+        return self._refresh_token_path.read_text().strip()
+
+    @refresh_token.setter
+    def refresh_token(self, value):
+        if not value:
+            return
+        if not self._refresh_token_path.is_file():
+            self._refresh_token_path.touch()
+        self._refresh_token_path.write_text(value)
+
+    def login(self):
+        logged_in = False
+        if self.refresh_token:
+            try:
+                self.client.login(None, None, self.refresh_token)
+                logged_in = True
+                self.logger.info('Logged in with refresh_token')
+            except:
+                self.logger.info('Login with refresh_token failed')
+
+        if not logged_in:
+            token = self.client.login(PIXIV_USERNAME, PIXIV_PASSWORD)
+            self.logger.info('Logged in with username/password')
+            self.refresh_token = token.get('response', {}).get('refresh_token')
 
     def _chunks(self, iterable, size=10):
         """https://stackoverflow.com/a/24527424
