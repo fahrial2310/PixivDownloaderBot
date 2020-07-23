@@ -10,6 +10,7 @@ import re
 from pixiv.downloader import PixivDownloader, PixivDownloaderError
 from telegram import Bot, Update, InputMediaPhoto, ParseMode
 from telegram.ext import run_async, MessageHandler, Filters
+from telegram.error import TelegramError
 
 from pixivdownloader.bot.bot import main_bot
 from pixivdownloader.bot.settings import PIXIV_USERNAME, PIXIV_PASSWORD, URL, DOWNLOAD_TO
@@ -215,9 +216,11 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             try:
                 self._download_all_of_user(bot, update, id, zip_it=zip_it)
             except Exception as e:
-                if not tried_relogin:
+                self.logger.exception(e)
+                if not isinstance(e, TelegramError) and not tried_relogin:
                     try:
                         self.login()
+                        self.logger.info('Trying relogging')
                         self._download_all_of_user(bot, update, id, zip_it=zip_it)
                         continue
                     except:
@@ -294,16 +297,16 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                 self.logger.info(f'Sending {id} to user')
                 self.parent._send_to_user(id, paths, self.bot, self.update, prefix=f'{index}/{self.total} ')
             except Exception as e:
-                self.fail(id)
                 self.logger.exception(e)
+                self.fail(id, index)
 
-        def fail(self, id):
-            self.update.effective_message.reply_text(f'Could not download/send post "{self.parent.post_link.format(id)}"')
+        def fail(self, id, index, reason='send'):
+            self.update.effective_message.reply_markdown(f'Could not {reason} post {index}/{self.total} [{id}]({self.parent.post_link.format(id)})')
 
         def send(self, data):
             index, (id, paths) = data
             if not paths:
-                self.fail(id)
+                self.fail(id, index, 'download')
                 return
 
             if self.zip_it:
