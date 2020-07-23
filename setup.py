@@ -22,6 +22,7 @@ setup(name='PixivDownloaderBot',
           'pixivdownloader',
           'requests_html',
           'opencv-python',
+          'Pillow',
       ],
 
       entry_points={

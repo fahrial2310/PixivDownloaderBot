@@ -8,6 +8,7 @@ from zipfile import ZipFile
 import logging
 import re
 
+from PIL import Image, UnidentifiedImageError
 from pixiv.downloader import PixivDownloader, PixivDownloaderError
 from telegram import Bot, Update, InputMediaPhoto, ParseMode
 from telegram.ext import run_async, MessageHandler, Filters
@@ -83,10 +84,23 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             yield chain([first], islice(iterator, size - 1))
 
     def _file_to_bytes(self, path: Path) -> BytesIO:
-        bytes = BytesIO()
-        bytes.write(path.read_bytes())
-        bytes.seek(0)
-        return bytes
+        buffer = BytesIO()
+        buffer.write(path.read_bytes())
+        buffer.seek(0)
+        return buffer
+
+    def _resize_if_necessary(self, path: Path) -> Image:
+        MAX = 2000
+        try:
+            image = Image.open(path)
+            if MAX < image.height >= image.width:
+                print(path)
+                return image.resize((int(image.width * (MAX / image.height)), MAX), Image.ANTIALIAS)
+            elif MAX < image.width >= image.height:
+                print(path)
+                return image.resize((MAX, int(image.height * (MAX / image.width))), Image.ANTIALIAS)
+        except UnidentifiedImageError:
+            pass
 
     def _with_url_possible(self, path: Path) -> bool:
         size = path.stat().st_size / 1000 / 1000  # In MB
@@ -98,6 +112,15 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         )
 
     def _file_to_upload(self, path: Path) -> str or BytesIO:
+        small = path.with_name(path.stem + '-small' + path.suffix)
+        if not small.is_file():
+            image = self._resize_if_necessary(path)
+            if image:
+                image.save(small)
+                path = small
+        else:
+            path = small
+
         if self._with_url_possible(path):
             return URL.rstrip('/') + '/' + str(path.relative_to(self.out_dir))
         else:
