@@ -107,7 +107,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         tried_relogin = False
 
         if not text:
-            message.reply_text('No URL or ID supplied')
+            message.reply_text('No URL or ID supplied').result()
             return
 
         ids = re.findall('(\\d+)', text.replace('\n', ' '))
@@ -277,7 +277,7 @@ Just send me a link or the id of the post and I'll give you the images / videos.
                             caption=f'{self.total}/{self.total}'
                         )
                 except Exception as e:
-                    self.update.effective_message.reply_text(f'Could not send ZIP "{self.user_id} - {self.xth_zip.value}" for unknown reason')
+                    self.update.effective_message.reply_text(f'Could not send ZIP "{self.user_id} - {self.xth_zip.value}" for unknown reason').result()
                     self.logger.exception(e)
                 self.xth_zip.value += 1
                 self.current_size.value= 0
@@ -314,18 +314,18 @@ Just send me a link or the id of the post and I'll give you the images / videos.
     def _download_all_of_user(self, bot, update, user_id, zip_it=False):
         illusts = []
         total_before = -1
-        update.effective_message.reply_text(f'Collecting posts of user {user_id}')
+        update.effective_message.reply_text(f'Collecting posts of user {user_id}').result()
         while len(illusts) % 30 == 0 and not total_before == len(illusts):
             total_before = len(illusts)
             self.logger.info(f'Collecting posts of user "{user_id}" - offset {total_before}')
             result = self.client.api.user_illusts(user_id, filter=None, req_auth=True, offset=total_before)
             illusts += result['illusts']
             if not illusts:
-                update.effective_message.reply_text('No works found for given user')
+                update.effective_message.reply_text('No works found for given user').result()
                 return
 
         total = len(illusts)
-        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work) from {user_id}')
+        update.effective_message.reply_text(f'Downloading {total} works (there can be multiple images per work) from {user_id}').result()
         self.logger.info(f'Start downloading {user_id}\'s posts')
 
         sender = self.Sender(self, zip_it, user_id, total, update, bot)

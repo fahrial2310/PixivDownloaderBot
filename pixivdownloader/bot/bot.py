@@ -29,11 +29,8 @@ class MQBot(Bot):
             pass
 
     @messagequeue.queuedmessage
-    def send_message(self, *args, **kwargs):
-        """Wrapped method would accept new `queued` and `isgroup`
-        OPTIONAL arguments"""
-        return super(MQBot, self).send_message(*args, **kwargs)
-
+    def _message(self, *args, **kwargs):
+        return super(MQBot, self)._message(*args, **kwargs)
 
 class MainBot:
     def __init__(self, token: str, mode: str, mode_config: dict = None, admins: List[str] = None):
@@ -46,7 +43,7 @@ class MainBot:
         self.logger = logging.getLogger(self.__class__.__name__)
 
     def start(self):
-        queue = messagequeue.MessageQueue(all_burst_limit=29, all_time_limit_ms=1017)
+        queue = messagequeue.MessageQueue(all_burst_limit=28, all_time_limit_ms=1017)
         request = Request(con_pool_size=8)
         bot = MQBot(self.token, request=request, mqueue=queue)
 
