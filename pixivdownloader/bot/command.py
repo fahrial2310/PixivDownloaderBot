@@ -1,7 +1,8 @@
 from io import BytesIO
 from itertools import chain, islice
-from multiprocessing import Pool, Manager
+from multiprocessing import Manager, JoinableQueue, Process
 from pathlib import Path
+from threading import Thread
 from urllib.parse import urlparse
 from zipfile import ZipFile
 import logging
@@ -314,6 +315,17 @@ Just send me a link or the id of the post and I'll give you the images / videos.
             else:
                 self.send_as_media(id, paths, index)
 
+    def _download_worker(self, download_queue: JoinableQueue, send_queue: JoinableQueue):
+        for index, illust in iter(download_queue.get, 'STOP'):
+            data_set = self._simple_download(illust)
+            send_queue.put((index, data_set))
+            download_queue.task_done()
+
+    def _send_worker(self, send_queue: JoinableQueue, sender: Sender):
+        for data_set in iter(send_queue.get, 'STOP'):
+            sender.send(data_set)
+            send_queue.task_done()
+
     def _download_all_of_user(self, bot, update, user_id, zip_it=False):
         illusts = []
         total_before = -1
@@ -332,38 +344,22 @@ Just send me a link or the id of the post and I'll give you the images / videos.
         self.logger.info(f'Start downloading {user_id}\'s posts')
 
         sender = self.Sender(self, zip_it, user_id, total, update, bot)
+        download_queue = JoinableQueue()
+        send_queue = JoinableQueue()
 
-        download_pool = Pool(4)
-        sender_pool = Pool(4)
+        for index, illust in enumerate(illusts, 1):
+            download_queue.put((index, illust))
 
-        class DownloadIter:
-            def __init__(self, iterable, length):
-                self.iterable = iterable
-                self.length = length
+        for i in range(4):
+            # Downloader
+            Process(target=self._download_worker, args=(download_queue, send_queue)).start()
+            # Sender
+            Thread(target=self._send_worker, args=(send_queue, sender)).start()
 
-            def __len__(self):
-                return self.length
-
-            def __iter__(self):
-                return self.iterable
-
-            def __next__(self):
-                return next(self.iterable)
-
-        download_iter = DownloadIter(
-            enumerate(download_pool.imap(self._simple_download, illusts, 4), 1),
-            total)
-
-        sender_pool.map(sender.send, download_iter, 4)
+        download_queue.join()
+        send_queue.join()
 
         self.logger.info(f'All {user_id} posts have been sent')
         update.effective_message.reply_text(f'All {total} posts for user {user_id} have been sent')
-
-        sender_pool.close()
-        download_pool.close()
-
-        sender_pool.join()
-        download_pool.join()
-
 
 command = Command()
