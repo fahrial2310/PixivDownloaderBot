@@ -1,12 +1,12 @@
 import logging
 
-TELEGRAM_API_TOKEN = ''
+TELEGRAM_API_TOKEN = '7252516378:AAHj2Ue8PYqm5iM9CWJTh3txQMmgu1-rJDg'
 BASE_URL =  f'https://some.url/{TELEGRAM_API_TOKEN}'
 
-ADMINS = ['@USERNAME']
+ADMINS = ['@sengklek_ais']
 
-PIXIV_USERNAME = ''
-PIXIV_PASSWORD = ''
+PIXIV_USERNAME = 'user_gkfw3328'
+PIXIV_PASSWORD = 'fahri2310'
 URL = BASE_URL + '/media'
 DOWNLOAD_TO = '/some/path/to/files'
 
