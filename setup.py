@@ -2,13 +2,13 @@ from setuptools import find_packages, setup
 
 version = '0.0.1.dev0'
 
-setup(name='PixivDownloaderBot',
+setup(name='Alvinpixivbot',
       version=version,
       description='I download pixiv posts for you, incl. videos',
       long_description=f'{open("README.rst").read()}\n{open("CHANGELOG.rst").read()}',
 
-      author='Nachtalb',
-      url='https://github.com/Nachtalb/PixivDownloaderBot',
+      author='Rii??',
+      url='https://github.com/fahrial2310/PixivDownloaderBot',
       license='GPL3',
 
       packages=find_packages(exclude=['ez_setup']),
